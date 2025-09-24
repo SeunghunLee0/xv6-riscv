@@ -105,3 +105,10 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+extern int kfreec(void);
+uint64
+sys_freec(void)
+{
+return (uint64)kfreec();
+}
