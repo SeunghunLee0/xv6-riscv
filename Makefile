@@ -143,7 +143,9 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_hello\
-	$U/_info
+	$U/_info\
+	$U/_fragtest\
+	$U/_memdrive
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
 
