@@ -1,0 +1,109 @@
+Project 3: xv6 Memory Management
+Name: Seunghun Lee
+NSHE: 2002291392
+Branch: proj3
+
+------------------------------------------------------------
+1. Introduction
+The xv6 operating system is a simplified UNIX-like OS developed by MIT for educational use.  
+Its user-level memory management relies on a basic malloc/free library implemented in user/umalloc.c.  
+This library uses the sbrk() system call to extend a process’s heap and manages allocations through a simple free-list.
+
+Project 3 focuses on improving and analyzing this memory management behavior.  
+The goals are:
+1. To measure internal fragmentation by extending umalloc with a new frag_bytes() function.  
+2. To design a user-space driver (memdrive) that stresses malloc and reports wasted memory.  
+3. To implement a segregated-list allocator (block_alloc/block_free) and compare its efficiency with malloc.  
+
+The project demonstrates how allocator design affects fragmentation and memory utilization 
+within xv6’s constrained environment through these steps.
+
+
+2. Provided malloc Library and Fragmentation
+The provided user-level malloc library (user/umalloc.c) in xv6 implements dynamic memory allocation 
+using a simple free-list strategy.  
+When malloc() requests memory, the allocator scans the list for a free block large enough to satisfy the request.  
+If no suitable block exists, it calls sbrk() to extend the heap by one or more pages (each 4096 bytes).  
+Freed blocks are returned to the list and may be coalesced with adjacent free space.  
+This design is straightforward but easily leads to internal fragmentation.
+
+Fragmentation occurs because allocated blocks rarely match page boundaries exactly, 
+and many small allocations leave gaps of unused memory.  
+When a program continuously allocates and frees different-sized chunks, the heap becomes increasingly fragmented,
+resulting in wasted space that cannot be reused efficiently.
+
+To measure this fragmentation, the frag_bytes() function was added to umalloc.c.  
+It reports the difference between total memory obtained from sbrk() and the total user-requested bytes currently in use.
+
+Using the memdrive program in malloc mode, memory was stressed with small irregular allocation sizes 
+to maximize internal fragmentation.  
+The results were as follows:
+
+Total Allocations  | 99,866 
+Requested Sum      | 8,388,648 bytes
+Fragmented Bytes   | 2,031,592
+After Partial Free | 2,031,592
+After Full Free    | 2,031,592
+
+These results show that even when the program frees all allocated blocks, the fragmented memory remains 
+because the sbrk-based allocator never releases heap pages back to the kernel.  
+Thus, internal fragmentation remains significant in xv6’s basic allocator.
+
+
+3. Implementation of block_alloc and block_free
+The segregated list allocator divides heap pages into fixed-size chunks that evenly divide the page size (4096 bytes).  
+Each page belongs to one “class” of chunk sizes (e.g., 16, 32, 64, 128, 256, 512, 1024, 2048, or 4096 bytes).  
+This design allows small allocations to share a page without interfering with other sizes, reducing internal fragmentation.
+
+Each class is represented by a bucket structure that links together pages of the same chunk size.  
+Every page_node stores:
+- base: the page’s starting address
+- chunk_size: size of each allocation within the page
+- chunks_per_page: number of chunks = 4096 / chunk_size
+- bitmap: tracks which chunks are in use (1) or free (0)
+- next: pointer to the next page of the same class
+
+When block_alloc() is called, the allocator:
+1. Rounds the requested size up to the next valid chunk size that divides the page.  
+2. Searches the corresponding bucket for a page with a free chunk.  
+3. If all pages are full, allocates a new page via sbrk() and initializes its bitmap.  
+4. Marks one chunk as used and returns its address.
+
+When block_free() is called, the allocator:
+1. Computes the base page address of the pointer.  
+2. Finds the corresponding page_node in the class list.  
+3. Determines the chunk index within that page.  
+4. Clears the corresponding bit in the bitmap, marking it as free again.
+
+This method achieves faster allocations for uniform small objects and reduces memory waste by grouping similar-sized requests into the same pages.  
+It also avoids excessive internal fragmentation because each page holds only one size category of allocations.
+
+4. Comparison: malloc vs block allocator
+The memdrive driver was executed in two modes with identical request patterns:
+
+Measured results (example run with 8MB target):
+
+| Mode   | Allocations | Requested Sum (bytes)  | Fragmented Bytes | After Partial Free | After Full Free |
+|--------|-------------|------------------------|------------------|--------------------|-----------------|
+| malloc | 99,866      | 8,388,648              | 2,031,592        | 2,031,592          | 2,031,592       |
+| block  | 99,866      | 8,388,648              | 159,066          | 159,066            | 159,066         |
+
+Analysis:
+Internal fragmentation is significantly reduced in the segregated-list allocator.
+In this run, wasted bytes decreased from malloc to block, an improvement of roughly 12–13×.
+The “After Full Free” values remain nonzero because xv6’s user-space allocator extends the heap with sbrk()
+but does not release pages back to the kernel so total sbrk-acquired memory persists even after freeing all blocks.
+The benefit comes from page-level homogeneity: each page holds a single chunk size class,
+avoiding mixed-size leftovers that drive internal fragmentation in the baseline free-list.
+
+5. Conclusion
+The project demonstrates how allocator design affects internal fragmentation and memory utilization.  
+By extending xv6’s malloc library with frag_bytes(), it became possible to quantify wasted memory at the user level.  
+The memdrive driver successfully exposed how the basic free-list allocator accumulates unused space when many small allocations occur.
+
+Implementing a segregated-list allocator significantly reduced internal fragmentation by grouping allocations of similar size into dedicated pages.  
+Although xv6’s user space cannot return pages to the kernel, the overall memory efficiency improved dramatically within the process heap.
+
+This assignment clarified how low-level mechanisms like sbrk(), page alignment, and free-list policies influence performance.  
+The segregated-list strategy provides a foundation for more advanced allocators such as slab or buddy systems.  
+Through this exercise, I gained a practical understanding of how operating systems manage memory at the page and block level.

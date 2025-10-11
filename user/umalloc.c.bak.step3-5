@@ -134,7 +134,6 @@ block_free(void* p){
 
 static uint64 total_sbrk_bytes = 0;
 static uint64 total_user_requested = 0;
-static uint64 in_use_requested_bytes = 0;
 // static uint64 total_user_freed = 0;
 // Memory allocator by Kernighan and Ritchie,
 // The C programming Language, 2nd ed.  Section 8.7.
@@ -145,7 +144,6 @@ union header {
   struct {
     union header *ptr;
     uint size;
-    uint req_size;
   } s;
   Align x;
 };
@@ -217,8 +215,6 @@ malloc(uint nbytes)
         p->s.size = nunits;
       }
       freep = prevp;
-      p->s.req_size = nbytes;
-      in_use_requested_bytes += nbytes;
       return (void*)(p + 1);
     }
     if(p == freep)
@@ -230,9 +226,9 @@ malloc(uint nbytes)
 uint64
 frag_bytes(void)
 {
-  uint64 fragmented = 0;
-  if (total_sbrk_bytes > in_use_requested_bytes)
-    fragmented = total_sbrk_bytes - in_use_requested_bytes;
-  return fragmented;
-}
+    uint64 fragmented = 0;
+    if (total_sbrk_bytes > total_user_requested)
+        fragmented = total_sbrk_bytes - total_user_requested;
 
+    return fragmented;
+}
