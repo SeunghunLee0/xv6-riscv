@@ -487,6 +487,12 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+
+        if (mode == 1) {
+          printf("PID %d running (priority %d)\n", p->pid, p->priority);
+        }
+
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
