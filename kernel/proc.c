@@ -7,7 +7,7 @@
 #include "defs.h"
 
 struct cpu cpus[NCPU];
-
+int mode = 0;
 struct proc proc[NPROC];
 
 struct proc *initproc;
@@ -278,7 +278,8 @@ kfork(void)
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
-
+  np->priority = 10;
+  np->num_epoch_slots = 0;
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -302,6 +303,46 @@ kfork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  return pid;
+}
+
+// Project 4: priority_fork(prio)
+int
+priority_fork(int prio)
+{
+  struct proc *p = myproc();
+  struct proc *np;
+
+  if (prio < 0 || prio > 19)
+    return -1;
+
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  np->sz = p->sz;
+  *(np->trapframe) = *(p->trapframe);
+
+  np->trapframe->a0 = 0;
+
+  for(int i = 0; i < NOFILE; i++){
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  }
+  np->cwd = idup(p->cwd);
+  safestrcpy(np->name, p->name, sizeof(p->name));
+  np->parent = p;
+  np->priority = prio;
+  np->num_epoch_slots = 0;
+  np->state = RUNNABLE;
+
+  int pid = np->pid;
+  release(&np->lock);
   return pid;
 }
 
@@ -687,4 +728,14 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+//project4
+void set_debug_mode(int enable) {
+  if (enable == 0)
+    mode = 0;
+  else if (enable == 1)
+    mode = 1;
+  else
+    mode = -1;
 }

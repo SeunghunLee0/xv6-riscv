@@ -104,4 +104,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+int priority;         // 0..19
+int num_epoch_slots;  // remaining slots in current epoch
 };
+void set_debug_mode(int enable);
+int priority_fork(int prio);
