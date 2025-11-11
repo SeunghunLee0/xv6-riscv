@@ -462,52 +462,7 @@ kwait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
-void
-scheduler(void)
-{
-  struct proc *p;
-  struct cpu *c = mycpu();
 
-  c->proc = 0;
-  for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
-    intr_on();
-    intr_off();
-
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-
-
-        if (mode == 1) {
-          printf("PID %d running (priority %d)\n", p->pid, p->priority);
-        }
-
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
-      }
-      release(&p->lock);
-    }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
-    }
-  }
-}
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -744,4 +699,103 @@ void set_debug_mode(int enable) {
     mode = 1;
   else
     mode = -1;
+}
+
+
+void
+scheduler(void)
+{
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+    intr_on();
+    int need_new_epoch = 1;
+    for(struct proc *pp = proc; pp < &proc[NPROC]; pp++){
+      acquire(&pp->lock);
+      if (pp->state == RUNNABLE && pp->num_epoch_slots > 0) {
+        need_new_epoch = 0;
+        release(&pp->lock);
+        break;
+      }
+      release(&pp->lock);
+    }
+
+    if (need_new_epoch) {
+      int sumw = 0;
+      for(struct proc *pp = proc; pp < &proc[NPROC]; pp++){
+        acquire(&pp->lock);
+        if (pp->state == RUNNABLE) {
+          int w = 20 - pp->priority;
+          if (w < 0) w = 0;
+          sumw += w;
+        }
+        release(&pp->lock);
+      }
+
+      if (mode == 1) {
+        printf("----- Starting New Epoch ------\n");
+      }
+
+      if (sumw > 0) {
+        int slots_left = 40;
+        for(struct proc *pp = proc; pp < &proc[NPROC]; pp++){
+          acquire(&pp->lock);
+          if (pp->state == RUNNABLE) {
+            int w = 20 - pp->priority;
+            if (w < 0) w = 0;
+            int alloc = (40 * w) / sumw;
+            pp->num_epoch_slots = alloc;
+            slots_left -= alloc;
+          } else {
+            pp->num_epoch_slots = 0;
+          }
+          release(&pp->lock);
+        }
+
+        while (slots_left > 0) {
+          for(struct proc *pp = proc; pp < &proc[NPROC] && slots_left > 0; pp++){
+            acquire(&pp->lock);
+            if (pp->state == RUNNABLE) {
+              int w = 20 - pp->priority;
+              if (w > 0) {
+                pp->num_epoch_slots += 1;
+                slots_left -= 1;
+              }
+            }
+            release(&pp->lock);
+          }
+          if (sumw == 0) break;
+        }
+      } else {
+      }
+    }
+
+    int scheduled = 0;
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE && p->num_epoch_slots > 0){
+        if (mode == 1) {
+          printf("PID %d running (priority %d) %d epochs remaining\n",
+                 p->pid, p->priority, p->num_epoch_slots);
+        }
+
+        p->state = RUNNING;
+        mycpu()->proc = p;
+        swtch(&mycpu()->context, &p->context);
+        mycpu()->proc = 0;
+
+        if (p->num_epoch_slots > 0)
+          p->num_epoch_slots -= 1;
+
+        scheduled = 1;
+        release(&p->lock);
+        break;
+      }
+      release(&p->lock);
+    }
+
+    if (!scheduled) {
+    }
+  }
 }
